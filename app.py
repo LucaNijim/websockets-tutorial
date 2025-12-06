@@ -144,7 +144,7 @@ def health_check(connection, request):
 async def main():
     port = int(os.environ.get("PORT", "8001"))
     print(f"Listening on port {port}")
-    async with serve(handler, "", 8001, process_request=health_check) as server:
+    async with serve(handler, "", port, process_request=health_check) as server:
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, server.close)
         await server.wait_closed()
