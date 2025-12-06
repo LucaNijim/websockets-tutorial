@@ -5,7 +5,7 @@ window.addEventListener("DOMContentLoaded", () => {
     const board = document.querySelector(".board");
     createBoard(board);
     // initialize websocket connection
-    const websocket = new WebSocket("ws://localhost:8001/");
+    const websocket = new WebSocket(getWebSocketServer());
     initGame(websocket);
     receiveEvents(board, websocket);
     // enable to send moves if not spectator
@@ -70,4 +70,14 @@ function receiveEvents(board, websocket) {
                 
         }
     });
+}
+
+function getWebSocketServer() {
+  if (window.location.host === "lucanijim.github.io") {
+    return "wss://convincing-alleen-luca-personal-994e43bc.koyeb.app/";
+  } else if (window.location.host === "localhost:8000") {
+    return "ws://localhost:8001/";
+  } else {
+    throw new Error(`Unsupported host: ${window.location.host}`);
+  }
 }
