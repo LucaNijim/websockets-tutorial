@@ -1,3 +1,4 @@
+import secrets
 from dataclasses import dataclass
 
 from websockets.legacy.server import WebSocketServerProtocol
@@ -23,7 +24,9 @@ class Room:
     def __init__(self):
         self.game = Connect4()
         self.connections: dict[WebSocketServerProtocol, PlayerInfo] = {}
+        self.spectators: set[WebSocketServerProtocol] = set()
         self.rematch_votes: set[WebSocketServerProtocol] = set()
         self.game_over = False
         self.record: list[dict] = []
+        self.watch_key = secrets.token_urlsafe(8)
         

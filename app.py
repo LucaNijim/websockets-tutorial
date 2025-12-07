@@ -12,7 +12,11 @@ from structures.room import Room, PlayerInfo
 JOIN = {}
 WATCH = {}
 
-async def play(websocket, game, player, connected):
+async def play(websocket, room):
+    game = room.game
+    player = room.connections[websocket].role
+    connected = room.connections.keys()
+    specs = room.spectators
     async for message in websocket:
         event_in = json.loads(message)
         print('Received event:', event_in)
@@ -21,15 +25,18 @@ async def play(websocket, game, player, connected):
             print(f'Player {player}')
             try:
                 row = game.play(player, event_in["column"])
-                broadcast(connected, json.dumps({
+                broadcast(connected | specs, json.dumps({
                         "type": "play", 
                         "row": row, 
                         "column": event_in["column"], 
                         "player": player}))
                 
                 if game.winner is not None:
+                    room.game_over = True
+                    
                     broadcast(connected, json.dumps({
                             "type": "win", 
+                            "winner": game.winner, 
                             "message": f"Game Over! Winner is {game.winner}"
                         }))
                     
@@ -50,38 +57,6 @@ async def catchup(websocket, game):
         }
         await websocket.send(json.dumps(event))
 
-async def start(websocket, event1):
-    # initialize room 
-    room = Room()
-    room.connections[websocket] = PlayerInfo(PLAYER1, event1["nickname"])
-    # add this to global dict
-    join_key = secrets.token_urlsafe(8)
-    watch_key = secrets.token_urlsafe(8)
-    JOIN[join_key] = room
-    WATCH[watch_key] = room
-    
-    try:
-        # send secret to client
-        # so they can invite their friends
-        event = {
-            "type": "init",
-            "join": join_key, 
-            "watch": watch_key
-        }
-        await websocket.send(json.dumps(event))
-        
-        # temp ( for testing )
-        print(f"First player started game at {join_key}")
-        await play(
-            websocket, 
-            room.game, 
-            room.connections[websocket].role, 
-            room.connections.keys())
-    finally:
-        # clear the join thing to avoid memory leaks
-        print(f"Player 1 exiting game at {join_key}")
-        del JOIN[join_key]
-
 async def error(websocket, message):
     event = {
         "type": "error",
@@ -89,9 +64,41 @@ async def error(websocket, message):
     }
     await websocket.send(json.dumps(event))
     
-async def join(websocket, event1):
+async def start_room(websocket, event1):
+    # initialize room 
+    room = Room()
+    nickname = "player_1"
+    room.connections[websocket] = PlayerInfo(PLAYER1, nickname)
+    # add this to global dict
+    join_key = secrets.token_urlsafe(8)
+    watch_key = room.watch_key
+    JOIN[join_key] = room
+    WATCH[room.watch_key] = room
+    
+    try:
+        # send secret to client
+        # so they can invite their friends
+        print(f'sending init event')
+        event = {
+            "type": "init",
+            "join_key": join_key, 
+            "watch_key": watch_key
+        }
+        await websocket.send(json.dumps(event))
+        
+        # temp ( for testing )
+        print(f"First player, {nickname}, started game at {join_key}")
+        await play(
+            websocket, 
+            room)
+    finally:
+        # clear the join thing to avoid memory leaks
+        print(f"Player 1 exiting game at {join_key}")
+        del JOIN[join_key]
+    
+async def join_room(websocket, event1):
     # find game
-    join_key, nickname = event1["join"], event1["nickname"]
+    join_key, nickname = event1["join"], "player_2"
     try:
         room = JOIN[join_key]
     except KeyError:
@@ -102,45 +109,49 @@ async def join(websocket, event1):
     room.connections[websocket] = PlayerInfo(PLAYER2, nickname)
     try: 
         # testing
-        print(f"Second player joined game {id(room)} at {join_key}")
+        print(f"Second player, {nickname}, joined game {id(room)} at {join_key}")
+        event = {
+            "type": "init",
+            "watch_key": room.watch_key
+        }
+        await websocket.send(json.dumps(event))
         await catchup(websocket, room.game)
         await play(
             websocket, 
-            room.game, 
-            room.connections[websocket].role, 
-            room.connections.keys())
+            room)
     finally:
         print(f"Player 2 exiting game at {join_key}")
         del room.connections[websocket]
 
 async def watch(websocket, watch_key):
     try:
-        game, connected = WATCH[watch_key]
+        room = WATCH[watch_key]
     except KeyError:
         await error(websocket, f"No watch key {watch_key}")
         return
     
-    connected.add(websocket)
+    room.spectators.add(websocket)
     try:
-        print(f"Spectator joined game {id(game)} at {watch_key}")
-        await catchup(websocket, game)
+        print(f"Spectator joined room {id(room)} at {watch_key}")
+        await catchup(websocket, room.game)
         await websocket.wait_closed()
     finally:
         print(f"Spectator exiting game at {watch_key}")
-        connected.remove(websocket)
+        room.spectators.remove(websocket)
 
 async def handler(websocket):
     message = await websocket.recv()
     event = json.loads(message)
-    assert event["type"] == "init"
-    
-    if "join" in event:
-        await join(websocket, event) 
-    elif "watch" in event:
-        await watch(websocket, event["watch"])
-    else:
-        # first player starts
-        await start(websocket, event)
+    if event["type"] == "init":
+        assert event["type"] == "init"
+        
+        if "join" in event:
+            await join_room(websocket, event) 
+        elif "watch" in event:
+            await watch(websocket, event["watch"])
+        else:
+            # first player starts
+            await start_room(websocket, event)
 
 def health_check(connection, request):
     print(f"Health check request from {connection}")

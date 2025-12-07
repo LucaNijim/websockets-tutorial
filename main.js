@@ -19,9 +19,6 @@ function initGame(websocket) {
     websocket.addEventListener("open", () => {
         const params = new URLSearchParams(window.location.search);
         let event = {"type": "init"};
-        if (!params.has(watch)) {
-            event.nickname = prompt("What is your nickname?");
-        }
         if (params.has("join")) {
             event.join = params.get("join");
         } else if (params.has("watch")) {
@@ -50,6 +47,17 @@ function showMessage(message) {
     window.setTimeout(() => window.alert(message), 50);
 }
 
+function showRematchUI(winner) {
+    const overlay = document.getElementById("rematchOverlay");
+    const resultText = document.getElementById("resultText");
+    const rematchBtn = document.getElementById("rematchBtn");
+    const leaveBtn = document.getElementById("leaveBtn");
+    const status = document.getElementById("rematchStatus");
+    
+    
+    overlay.classList.remove("hidden");
+}
+
 function receiveEvents(board, websocket) {
     websocket.addEventListener("message", ({ data }) => {
         const event = JSON.parse(data);
@@ -58,15 +66,18 @@ function receiveEvents(board, websocket) {
                 playMove(board, event.player, event.column, event.row);
                 break;
             case "win":
-                showMessage(`Player ${event.player} wins!`);
+                showMessage(event.message);
+                showRematch(event.winner);
                 websocket.close(1000);
                 break;
             case "error":
                 showMessage(event.message);
                 break;
             case "init":
-                document.querySelector(".join").href = "?join=" + event.join;
-                document.querySelector(".watch").href = "?watch=" + event.watch;
+                if (event.hasOwnProperty("join_key")) {
+                    document.querySelector(".join").href = "?join=" + event.join_key;
+                }
+                document.querySelector(".watch").href = "?watch=" + event.watch_key;
                 break;
             default:
                 throw new Error(`Unsupported event type: ${event.type}`);
