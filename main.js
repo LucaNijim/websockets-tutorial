@@ -1,4 +1,4 @@
-import { createBoard, playMove } from "./connect4.js"
+import {createBoard, playMove} from "./connect4.js"
 
 window.addEventListener("DOMContentLoaded", () => {
     // initialize the UI
@@ -19,6 +19,9 @@ function initGame(websocket) {
     websocket.addEventListener("open", () => {
         const params = new URLSearchParams(window.location.search);
         let event = {"type": "init"};
+        if (!params.has(watch)) {
+            event.nickname = prompt("What is your nickname?");
+        }
         if (params.has("join")) {
             event.join = params.get("join");
         } else if (params.has("watch")) {

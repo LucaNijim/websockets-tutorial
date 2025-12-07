@@ -6,8 +6,8 @@ import http
 import os 
 import signal
 
-from connect4 import PLAYER1, PLAYER2, Connect4
-
+from gamelogic.connect4 import PLAYER1, PLAYER2, Connect4
+from structures.room import Room, PlayerInfo
 
 JOIN = {}
 WATCH = {}
@@ -15,7 +15,7 @@ WATCH = {}
 async def play(websocket, game, player, connected):
     async for message in websocket:
         event_in = json.loads(message)
-        print('Recieved event:', event_in)
+        print('Received event:', event_in)
         if event_in["type"] == "play":
             print(f'Event type: play')
             print(f'Player {player}')
@@ -33,6 +33,7 @@ async def play(websocket, game, player, connected):
                             "message": f"Game Over! Winner is {game.winner}"
                         }))
                     
+                    
             except ValueError as e:
                 await websocket.send(json.dumps({"type": "error", "message": str(e)}))
         else:
@@ -49,16 +50,15 @@ async def catchup(websocket, game):
         }
         await websocket.send(json.dumps(event))
 
-async def start(websocket):
-    # initialize game 
-    game = Connect4()
-    # initialize set of connecteds
-    connected = {websocket}
+async def start(websocket, event1):
+    # initialize room 
+    room = Room()
+    room.connections[websocket] = PlayerInfo(PLAYER1, event1["nickname"])
     # add this to global dict
     join_key = secrets.token_urlsafe(8)
     watch_key = secrets.token_urlsafe(8)
-    JOIN[join_key] = game, connected
-    WATCH[watch_key] = game, connected
+    JOIN[join_key] = room
+    WATCH[watch_key] = room
     
     try:
         # send secret to client
@@ -72,7 +72,11 @@ async def start(websocket):
         
         # temp ( for testing )
         print(f"First player started game at {join_key}")
-        await play(websocket, game, PLAYER1, connected)
+        await play(
+            websocket, 
+            room.game, 
+            room.connections[websocket].role, 
+            room.connections.keys())
     finally:
         # clear the join thing to avoid memory leaks
         print(f"Player 1 exiting game at {join_key}")
@@ -85,24 +89,29 @@ async def error(websocket, message):
     }
     await websocket.send(json.dumps(event))
     
-async def join(websocket, join_key):
+async def join(websocket, event1):
     # find game
+    join_key, nickname = event1["join"], event1["nickname"]
     try:
-        game, connected = JOIN[join_key]
+        room = JOIN[join_key]
     except KeyError:
         await error(websocket, f"No join key {join_key}")
         return
     
     # register to add
-    connected.add(websocket)
+    room.connections[websocket] = PlayerInfo(PLAYER2, nickname)
     try: 
         # testing
-        print(f"Second player joined game {id(game)} at {join_key}")
-        await catchup(websocket, game)
-        await play(websocket, game, PLAYER2, connected)
+        print(f"Second player joined game {id(room)} at {join_key}")
+        await catchup(websocket, room.game)
+        await play(
+            websocket, 
+            room.game, 
+            room.connections[websocket].role, 
+            room.connections.keys())
     finally:
         print(f"Player 2 exiting game at {join_key}")
-        connected.remove(websocket)
+        del room.connections[websocket]
 
 async def watch(websocket, watch_key):
     try:
@@ -126,12 +135,12 @@ async def handler(websocket):
     assert event["type"] == "init"
     
     if "join" in event:
-        await join(websocket, event["join"])
+        await join(websocket, event) 
     elif "watch" in event:
         await watch(websocket, event["watch"])
     else:
         # first player starts
-        await start(websocket)
+        await start(websocket, event)
 
 def health_check(connection, request):
     print(f"Health check request from {connection}")
@@ -139,7 +148,6 @@ def health_check(connection, request):
     if request.path == "/healthz":
         return connection.respond(http.HTTPStatus.OK, "OK\n")
     return None
-
 
 async def main():
     port = int(os.environ.get("PORT", "8001"))
